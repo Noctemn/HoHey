@@ -9,12 +9,16 @@ import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "@openzeppelin/contracts/security/Pausable.sol";
 import "./MaiToken.sol";
 
-contract Mai is Context, ERC20, ERC20Burnable, AccessControl, Pausable {
+import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Snapshot.sol";
+   
+
+contract Mai is Context, ERC20, ERC20Burnable, ERC20Snapshot, AccessControl, Pausable {
     using SafeMath for uint256;
     bytes32 public constant VOTER_ROLE = keccak256("VOTER_ROLE");
     bytes32 public constant STAKER_ROLE = keccak256("STAKER_ROLE");
     bytes32 public constant OWNER_ROLE = keccak256("OWNER_ROLE");
     bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
+    bytes32 public constant SNAPSHOT_ROLE = keccak256("SNAPSHOT_ROLE");
     
     event _VoteMade(uint256 indexed pollID, uint256 votes, address indexed voter, uint256 side);
     event _VoteClaimed(address indexed voter, uint256 amountClaimed);
@@ -32,6 +36,7 @@ contract Mai is Context, ERC20, ERC20Burnable, AccessControl, Pausable {
         _setupRole(STAKER_ROLE, msg.sender);
         _setupRole(OWNER_ROLE, msg.sender);
         _setupRole(PAUSER_ROLE, msg.sender);
+        _setupRole(SNAPSHOT_ROLE, msg.sender);
     }
 
     modifier onlyOwner() {
@@ -47,9 +52,13 @@ contract Mai is Context, ERC20, ERC20Burnable, AccessControl, Pausable {
         _unpause();
     }
 
+    function snapshot() public onlyOwner() {
+        _snapshot();
+    }
+
     function _beforeTokenTransfer(address from, address to, uint256 amount)
         internal
-        override
+        override(ERC20, ERC20Snapshot)
     {
         super._beforeTokenTransfer(from, to, amount);
     }
@@ -154,7 +163,7 @@ contract Mai is Context, ERC20, ERC20Burnable, AccessControl, Pausable {
         uint256 voteQuorum; // The percentage of for votes required for poll to pass
         uint256 votesFor; // Amount of votes supporting the proposal 
         uint256 votesAgainst; // Amount of votes countering the proposal
-        uint256 action; // action 1: Minting tokens; action 2: Burning tokens; action 3: Transfering tokens; action 4: Null action - opinion poll
+        uint256 action; // action 1: Minting tokens; action 2: Burning tokens; action 3: Transfering tokens; action 4: snapshot;
         bool ongoing; // Returns true if poll is still active
         mapping(address => uint256) _votesClaimed; // Amount of votes already claimed by the voter
         mapping(address => bool) _participant; // Maps address of user to whether they have voted in an active poll
@@ -175,7 +184,7 @@ contract Mai is Context, ERC20, ERC20Burnable, AccessControl, Pausable {
     @param _voteQuorum Assumes that the _quorumOption is false, passes in the percentage majority out of 100 that is required to win the vote
     @param _votedTokenAmount The amount of tokens minted/burned if poll is successful 
     @param _commitDuration Length of the poll in seconds
-    @param _action Type of poll, action 1 is for minting tokens, action 2 is for burning tokens, action 3 is for transfering tokens, action 4 is for an actionless opinion poll.
+    @param _action Type of poll, action 1 is for minting tokens, action 2 is for burning tokens, action 3 is for transfering tokens, action 4 is for taking a snapshot.
     */
 
     function startPoll(bool _quorumOption, uint256 _voteQuorum, uint256 _action, uint256 _votedTokenAmount, uint256 _commitDuration, address _pollStarter) public returns (uint256 pollID) {
@@ -409,6 +418,12 @@ contract Mai is Context, ERC20, ERC20Burnable, AccessControl, Pausable {
         _transfer(_msgSender(), recipient, pollMapping[pollID].votedTokenAmount);
         
         emit _resultsGenerated(pollMapping[pollID].votedTokenAmount, pollID);
+    }
+
+    function takeSnapshot(uint256 pollID) onlyOwner public virtual {
+        require(pollMapping[pollID].action == 4);
+        require(pollMapping[pollID].ongoing == false);
+        snapshot();        
     }
 
     /**
